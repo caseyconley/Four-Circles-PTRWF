@@ -3,16 +3,16 @@
 #include <inttypes.h>
 
 typedef struct {
-  Layer *layer;
   uint32_t hours;
   uint32_t minutes;
-} AppLayer;
+} ContainerLayerData;
 
 typedef struct {
   Window *mywindow;
-  AppLayer container_layer;
-
+  Layer *container_layer;
 } CaseyFaceData;
+
+static CaseyFaceData *s_app_data;
 
 static void prv_print_grect(const char *rect_name, GRect rect_to_print) {
   APP_LOG(APP_LOG_LEVEL_DEBUG, "%s\t\t - x: %d\t\ty: %d\t\tw: %d\t\th: %d", rect_name,
@@ -27,7 +27,7 @@ static GRect prv_shim_grect_centered_from_polar(GRect rect, GOvalScaleMode scale
 
 static void container_layer_update_proc(Layer *layer, GContext *ctx)
 {
-  AppLayer *app_layer = (AppLayer *)layer;
+  ContainerLayerData *data = layer_get_data(layer);
   GRect container_rect = layer_get_bounds(layer);
   container_rect = grect_inset(container_rect, GEdgeInsets(-10));
 
@@ -44,10 +44,16 @@ static void container_layer_update_proc(Layer *layer, GContext *ctx)
 
   graphics_context_set_text_color(ctx, GColorWhite);
   char minute_string[4] = {0};
-  snprintf(minute_string, sizeof(minute_string), "%"PRIu32, app_layer->minutes);
+  snprintf(minute_string, sizeof(minute_string), "%"PRIu32, data->minutes);
   const GFont minutes_font = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
   graphics_draw_text(ctx, minute_string, minutes_font, minute_circle_rect, GTextOverflowModeFill, GTextAlignmentCenter,
                      NULL);
+}
+
+static void prv_tick_timer_service_handler(struct tm *tick_time, TimeUnits units_changed) {
+  ContainerLayerData *data = layer_get_data(s_app_data->container_layer);
+  data->minutes = tick_time->tm_min;
+  layer_mark_dirty(s_app_data->container_layer);
 }
 
 static void main_window_load(Window *window)
@@ -55,39 +61,41 @@ static void main_window_load(Window *window)
   CaseyFaceData *data = window_get_user_data(window);
 
   Layer *root_layer = window_get_root_layer(window);
-  data->container_layer.layer = layer_create(layer_get_bounds(root_layer));
+  data->container_layer = layer_create_with_data(layer_get_bounds(root_layer), sizeof(ContainerLayerData));
 
-  layer_set_update_proc(data->container_layer.layer, container_layer_update_proc);
+  layer_set_update_proc(data->container_layer, container_layer_update_proc);
 
-  layer_add_child(root_layer, data->container_layer.layer);
+  layer_add_child(root_layer, data->container_layer);
 }
 
 static void main_window_unload(Window *window)
 {
   CaseyFaceData *data = window_get_user_data(window);
 
-  layer_destroy(data->container_layer.layer);
+  layer_destroy(data->container_layer);
 
   window_destroy(window);
-
 
   free(data);
 }
 
 static void init()
 {
-  CaseyFaceData *data = malloc(sizeof(CaseyFaceData));
-  memset(data, 0, sizeof(CaseyFaceData));
-  data->mywindow = window_create();
+  s_app_data = malloc(sizeof(CaseyFaceData));
+  memset(s_app_data, 0, sizeof(CaseyFaceData));
+  s_app_data->mywindow = window_create();
+  window_set_background_color(s_app_data->mywindow, GColorSunsetOrange);
 
-  window_set_user_data(data->mywindow, data);
+  tick_timer_service_subscribe(MINUTE_UNIT | HOUR_UNIT, prv_tick_timer_service_handler);
 
-  window_set_window_handlers(data->mywindow, (WindowHandlers){
+  window_set_user_data(s_app_data->mywindow, s_app_data);
+
+  window_set_window_handlers(s_app_data->mywindow, (WindowHandlers){
     .load = main_window_load,
     .unload = main_window_unload,
   });
 
-  window_stack_push(data->mywindow, true);
+  window_stack_push(s_app_data->mywindow, true);
 }
 
 static void deinit()
